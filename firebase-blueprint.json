@@ -1,0 +1,35 @@
+{
+  "entities": {
+    "UserPreference": {
+      "title": "User Preference",
+      "description": "Preferences for a specific user, including creator name and assistant settings.",
+      "type": "object",
+      "properties": {
+        "creatorName": {
+          "type": "string",
+          "description": "The name of the creator (e.g., Atharv)."
+        },
+        "preferredTitle": {
+          "type": "string",
+          "description": "How the user wants to be addressed (e.g., Sir)."
+        },
+        "isMuted": {
+          "type": "boolean",
+          "description": "Whether the assistant is muted by default."
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last update."
+        }
+      },
+      "required": ["creatorName", "preferredTitle", "lastUpdated"]
+    }
+  },
+  "firestore": {
+    "/preferences/{userId}": {
+      "schema": "UserPreference",
+      "description": "Global preferences for each user."
+    }
+  }
+}

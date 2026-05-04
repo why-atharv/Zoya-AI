@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global helpers
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // Validation blueprints
+    function isValidUserPreference(data) {
+      return data.keys().hasAll(['creatorName', 'preferredTitle', 'lastUpdated'])
+        && data.keys().size() <= 4
+        && data.creatorName is string && data.creatorName.size() <= 64
+        && data.preferredTitle is string && data.preferredTitle.size() <= 32
+        && (data.lastUpdated is timestamp || data.lastUpdated is string) // Allowing both for flexibility, but better as timestamp
+        && (!data.keys().hasAny(['isMuted']) || data.isMuted is bool);
+    }
+
+    match /preferences/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserPreference(incoming());
+      allow update: if isOwner(userId) && isValidUserPreference(incoming())
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['creatorName', 'preferredTitle', 'lastUpdated', 'isMuted'])
+        );
+      allow delete: if false; // Preferences should not be deleted usually
+    }
+  }
+}
