@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Mic, MicOff, Loader2, Volume2, VolumeX, Keyboard, Send, Trash2 } from "lucide-react";
-import { getZoyaResponse, getZoyaAudio, resetZoyaSession } from "./services/geminiService";
+import { Mic, MicOff, Loader2, Volume2, VolumeX, Keyboard, Send, Trash2, ThumbsUp, ThumbsDown } from "lucide-react";
+import { getSreeJiResponse, getSreeJiAudio, resetSreeJiSession } from "./services/geminiService";
 import { processCommand } from "./services/commandService";
 import { LiveSessionManager } from "./services/liveService";
 import Visualizer from "./components/Visualizer";
@@ -18,8 +18,11 @@ import {
   browserLocalPersistence,
   signOut
 } from "firebase/auth";
-import { auth } from "./lib/firebase";
+import { collection, addDoc } from "firebase/firestore";
+import { auth, db } from "./lib/firebase";
 import { savePreferences, subscribeToPreferences, UserPreferences } from "./services/preferenceService";
+
+import { getSreeJiErrorFeedback } from "./utils/errorHandlers";
 
 type AppState = "idle" | "listening" | "processing" | "speaking";
 
@@ -45,6 +48,8 @@ export default function App() {
     lastUpdated: new Date().toISOString()
   });
 
+  const [ratedMessages, setRatedMessages] = useState<Set<string>>(new Set());
+
   const [appState, setAppState] = useState<AppState>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const saved = localStorage.getItem("zoya_chat_history");
@@ -67,6 +72,36 @@ export default function App() {
 
   const liveSessionRef = useRef<LiveSessionManager | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const showSreeJiError = (error: any) => {
+    const feedback = getSreeJiErrorFeedback(error, preferences.creatorName, preferences.preferredTitle);
+    setMessages((prev) => [...prev, { id: Date.now().toString() + "-err", sender: "zoya", text: feedback }]);
+  };
+
+  const handleFeedback = async (messageId: string, rating: "up" | "down", responseText: string) => {
+    if (!user) return;
+    
+    // Find the prompt associated with this response (the message before it)
+    const messageIndex = messages.findIndex(m => m.id === messageId);
+    let userPrompt = "";
+    if (messageIndex > 0 && messages[messageIndex - 1].sender === "user") {
+      userPrompt = messages[messageIndex - 1].text;
+    }
+
+    try {
+      await addDoc(collection(db, "feedback"), {
+        messageId,
+        userId: user.uid,
+        rating,
+        responseText,
+        userPrompt,
+        createdAt: new Date().toISOString()
+      });
+      setRatedMessages(prev => new Set(prev).add(messageId));
+    } catch (error) {
+      console.error("Failed to submit feedback", error);
+    }
+  };
 
   // Auth Listener
   useEffect(() => {
@@ -102,6 +137,7 @@ export default function App() {
       }
     } catch (error) {
       console.error("Login failed", error);
+      showSreeJiError(error);
     }
   };
 
@@ -109,9 +145,10 @@ export default function App() {
     try {
       await signOut(auth);
       setMessages([]);
-      resetZoyaSession();
+      resetSreeJiSession();
     } catch (e) {
       console.error("Logout failed", e);
+      showSreeJiError(e);
     }
   };
 
@@ -143,65 +180,71 @@ export default function App() {
   }, [appState]);
 
   const handleTextCommand = useCallback(async (finalTranscript: string) => {
-    if (!finalTranscript.trim()) {
-      setAppState("idle");
-      return;
-    }
-
-    setMessages((prev) => [...prev, { id: Date.now().toString(), sender: "user", text: finalTranscript }]);
-    
-    // If live session is active, send text through it
-    if (isSessionActive && liveSessionRef.current) {
-      liveSessionRef.current.sendText(finalTranscript);
-      return;
-    }
-
-    setAppState("processing");
-
-    // 1. Check for browser commands
-    const commandResult = processCommand(finalTranscript);
-
-    let responseText = "";
-
-    if (commandResult.isBrowserAction) {
-      responseText = commandResult.action;
-      setMessages((prev) => [...prev, { id: Date.now().toString() + "-z", sender: "zoya", text: responseText }]);
-      
-      if (!isMuted) {
-        setAppState("speaking");
-        const audioBase64 = await getZoyaAudio(responseText);
-        if (audioBase64) {
-          await playPCM(audioBase64);
-        }
+    try {
+      if (!finalTranscript.trim()) {
+        setAppState("idle");
+        return;
       }
 
-      setAppState("idle");
-
-      setTimeout(() => {
-        if (commandResult.url) {
-          window.open(commandResult.url, "_blank");
-        }
-      }, 1500);
-    } else {
-      // 2. General Chit-Chat via Gemini
-      responseText = await getZoyaResponse(
-        finalTranscript, 
-        messagesRef.current,
-        preferences.creatorName,
-        preferences.preferredTitle
-      );
-      setMessages((prev) => [...prev, { id: Date.now().toString() + "-z", sender: "zoya", text: responseText }]);
+      setMessages((prev) => [...prev, { id: Date.now().toString(), sender: "user", text: finalTranscript }]);
       
-      if (!isMuted) {
-        setAppState("speaking");
-        const audioBase64 = await getZoyaAudio(responseText);
-        if (audioBase64) {
-          await playPCM(audioBase64);
-        }
+      // If live session is active, send text through it
+      if (isSessionActive && liveSessionRef.current) {
+        liveSessionRef.current.sendText(finalTranscript);
+        return;
       }
+
+      setAppState("processing");
+
+      // 1. Check for browser commands
+      const commandResult = processCommand(finalTranscript);
+
+      let responseText = "";
+
+      if (commandResult.isBrowserAction) {
+        responseText = commandResult.action;
+        setMessages((prev) => [...prev, { id: Date.now().toString() + "-z", sender: "zoya", text: responseText }]);
+        
+        if (!isMuted) {
+          setAppState("speaking");
+          const audioBase64 = await getSreeJiAudio(responseText);
+          if (audioBase64) {
+            await playPCM(audioBase64);
+          }
+        }
+
+        setAppState("idle");
+
+        setTimeout(() => {
+          if (commandResult.url) {
+            window.open(commandResult.url, "_blank");
+          }
+        }, 1500);
+      } else {
+        // 2. General Chit-Chat via Gemini
+        responseText = await getSreeJiResponse(
+          finalTranscript, 
+          messagesRef.current,
+          preferences.creatorName,
+          preferences.preferredTitle
+        );
+        setMessages((prev) => [...prev, { id: Date.now().toString() + "-zsj", sender: "zoya", text: responseText }]);
+        
+        if (!isMuted) {
+          setAppState("speaking");
+          const audioBase64 = await getSreeJiAudio(responseText);
+          if (audioBase64) {
+            await playPCM(audioBase64);
+          }
+        }
+        setAppState("idle");
+      }
+    } catch (error) {
+      console.error("Text command failed:", error);
+      showSreeJiError(error);
       setAppState("idle");
     }
-  }, [isMuted, isSessionActive, preferences]);
+  }, [isMuted, isSessionActive, preferences, showSreeJiError]);
 
   useEffect(() => {
     return () => {
@@ -219,11 +262,11 @@ export default function App() {
         liveSessionRef.current = null;
       }
       setAppState("idle");
-      resetZoyaSession();
+      resetSreeJiSession();
     } else {
       try {
         setIsSessionActive(true);
-        resetZoyaSession();
+        resetSreeJiSession();
         
         const session = new LiveSessionManager(preferences.creatorName, preferences.preferredTitle);
         session.isMuted = isMuted;
@@ -244,9 +287,9 @@ export default function App() {
         };
 
         await session.start();
-      } catch (e) {
-        console.error("Failed to start session", e);
-        setShowPermissionModal(true);
+      } catch (error) {
+        console.error("Failed to start session:", error);
+        showSreeJiError(error);
         setIsSessionActive(false);
         setAppState("idle");
       }
@@ -280,14 +323,14 @@ export default function App() {
       <header className="absolute top-0 left-0 w-full flex justify-between items-center z-20 shrink-0 px-6 py-4 md:px-12 md:py-6">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-violet-500 to-pink-500 flex items-center justify-center font-bold text-sm">
-            Z
+            S
           </div>
-          <h1 className="text-xl font-serif font-medium tracking-wide opacity-90">Zoya</h1>
+          <h1 className="text-xl font-serif font-medium tracking-wide opacity-90">Sree Ji</h1>
         </div>
         <div className="flex items-center gap-2">
           {user ? (
             <div className="flex items-center gap-3 mr-2 bg-white/5 pl-3 pr-1 py-1 rounded-full border border-white/10">
-               <span className="text-xs text-white/70 hidden md:block font-medium">Sir {preferences.creatorName}</span>
+               <span className="text-xs text-white/70 hidden md:block font-medium">{preferences.preferredTitle}</span>
                <button 
                  onClick={handleLogout}
                  className="group relative"
@@ -312,7 +355,7 @@ export default function App() {
               onClick={() => {
                 if (window.confirm("Are you sure you want to clear the chat history?")) {
                   setMessages([]);
-                  resetZoyaSession();
+                  resetSreeJiSession();
                 }
               }}
               className="p-2 rounded-full bg-white/5 hover:bg-red-500/20 hover:text-red-400 transition-colors border border-white/10"
@@ -338,7 +381,7 @@ export default function App() {
       {/* Main Content - Visualizer & Chat */}
       <main className="absolute inset-0 flex flex-row items-center justify-between w-full h-full z-10 overflow-hidden pt-20 pb-24 px-4 md:px-12 pointer-events-none">
         
-        {/* Left Column: Zoya Status */}
+        {/* Left Column: Sree Ji Status */}
         <div className="flex w-[30%] lg:w-[25%] h-full flex-col justify-center gap-4 z-10">
           <div className="h-6">
             <AnimatePresence>
@@ -358,8 +401,55 @@ export default function App() {
         </div>
 
         {/* Center Visualizer (Fixed Full Screen Background) */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
+        <div className="absolute inset-0 flex items-center justify-center z-0">
           <Visualizer state={appState} />
+          
+          {/* Chat History Overlay */}
+          <div className="absolute bottom-32 w-full max-w-2xl max-h-[40vh] overflow-y-auto px-6 flex flex-col gap-4 scrollbar-hide pointer-events-auto">
+            {messages.map((msg) => (
+              <div 
+                key={msg.id} 
+                className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
+              >
+                <div 
+                  className={`
+                    max-w-[85%] px-4 py-2 rounded-2xl text-sm md:text-base backdrop-blur-md border animate-in fade-in slide-in-from-bottom-2
+                    ${msg.sender === "user" 
+                      ? "bg-violet-500/10 border-violet-500/20 text-violet-100 rounded-tr-none" 
+                      : "bg-white/5 border-white/10 text-white/90 rounded-tl-none"}
+                  `}
+                >
+                  {msg.text}
+                  
+                  {msg.sender === "zoya" && !msg.id.includes("-err") && (
+                    <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5">
+                      {ratedMessages.has(msg.id) ? (
+                        <span className="text-[10px] text-white/40 uppercase tracking-widest font-mono">Feedback Sent</span>
+                      ) : (
+                        <>
+                          <button 
+                            onClick={() => handleFeedback(msg.id, "up", msg.text)}
+                            className="p-1 hover:text-green-400 transition-colors text-white/30"
+                            title="Helpful"
+                          >
+                            <ThumbsUp size={12} />
+                          </button>
+                          <button 
+                            onClick={() => handleFeedback(msg.id, "down", msg.text)}
+                            className="p-1 hover:text-red-400 transition-colors text-white/30"
+                            title="Not helpful"
+                          >
+                            <ThumbsDown size={12} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Right Column: User Status */}
@@ -398,7 +488,7 @@ export default function App() {
                 type="text"
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
-                placeholder="Type a message to Zoya..."
+                placeholder="Type a message to Sree Ji..."
                 className="flex-1 bg-transparent border-none outline-none text-white placeholder:text-white/30 text-sm"
                 autoFocus
               />

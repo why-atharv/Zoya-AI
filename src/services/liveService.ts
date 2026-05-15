@@ -1,7 +1,7 @@
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from "@google/genai";
 import { processCommand } from "./commandService";
 import { getSystemInstruction } from "./geminiService";
-import { getZoyaErrorFeedback } from "../utils/errorHandlers";
+import { getSreeJiErrorFeedback } from "../utils/errorHandlers";
 
 export class LiveSessionManager {
   private ai: GoogleGenAI;
@@ -183,7 +183,7 @@ export class LiveSessionManager {
           },
           onerror: (err) => {
             console.error("Live API Error:", err);
-            this.onMessage("zoya", getZoyaErrorFeedback(err, this.creatorName, this.preferredTitle));
+            this.onMessage("zoya", getSreeJiErrorFeedback(err, this.creatorName, this.preferredTitle));
             this.stop();
           }
         }
@@ -191,7 +191,7 @@ export class LiveSessionManager {
 
     } catch (error) {
       console.error("Failed to start Live Session:", error);
-      this.onMessage("zoya", getZoyaErrorFeedback(error, this.creatorName, this.preferredTitle));
+      this.onMessage("zoya", getSreeJiErrorFeedback(error, this.creatorName, this.preferredTitle));
       this.stop();
     }
   }

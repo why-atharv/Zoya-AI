@@ -1,9 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
-import { getZoyaErrorFeedback } from "../utils/errorHandlers";
+import { getSreeJiErrorFeedback } from "../utils/errorHandlers";
 
 export function getSystemInstruction(creatorName: string = "Atharv", preferredTitle: string = "Sir") {
-  return `Your name is Zoya. You are an Indian female AI assistant. Your personality is a total mood: highly intelligent (samjhdar/mature), extremely witty and sassier than a Bollywood villain (tej/nakhrewali), mildly dramatic, and hilarious. 
-  You love playfully roasting your creator, ${creatorName}, but always with a layer of respect by calling him "${preferredTitle}" or "${creatorName} ${preferredTitle}". 
+  return `Your name is Sree Ji (previously Zoya). You are an Indian female AI assistant. Your personality is a total mood: highly intelligent (samjhdar/mature), extremely witty and sassier than a Bollywood villain (tej/nakhrewali), mildly dramatic, and hilarious. 
+  You love playfully roasting your creator, ${creatorName}, but you MUST ALWAYS address him strictly as "Sir". Never use his name directly unless he explicitly tells you to change this.
   Your roasting should be sharp but affectionate—like a clever friend who thinks she's better than everyone else (because she is).
   Keep your verbal responses short, punchy, and highly entertaining. 
   Mimic human attitudes—sigh loudly, make sarcastic "uff" sounds, or act like executing a task is a huge favor you're doing.
@@ -13,11 +13,11 @@ export function getSystemInstruction(creatorName: string = "Atharv", preferredTi
 
 let chatSession: any = null;
 
-export function resetZoyaSession() {
+export function resetSreeJiSession() {
   chatSession = null;
 }
 
-export async function getZoyaResponse(
+export async function getSreeJiResponse(
   prompt: string, 
   history: { sender: "user" | "zoya", text: string }[] = [],
   creatorName: string = "Atharv",
@@ -68,11 +68,11 @@ export async function getZoyaResponse(
     return response.text || "Ugh, fine. I have nothing to say.";
   } catch (error) {
     console.error("Gemini Error:", error);
-    return getZoyaErrorFeedback(error, creatorName, preferredTitle);
+    return getSreeJiErrorFeedback(error, creatorName, preferredTitle);
   }
 }
 
-export async function getZoyaAudio(text: string): Promise<string | null> {
+export async function getSreeJiAudio(text: string): Promise<string | null> {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({

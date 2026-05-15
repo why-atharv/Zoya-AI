@@ -24,12 +24,50 @@
         }
       },
       "required": ["creatorName", "preferredTitle", "lastUpdated"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "Feedback for a specific response from the assistant.",
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "type": "string",
+          "description": "The unique ID of the message being rated."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The ID of the user providing the feedback."
+        },
+        "rating": {
+          "type": "string",
+          "enum": ["up", "down"],
+          "description": "The rating (up for positive, down for negative)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the feedback was provided."
+        },
+        "responseText": {
+          "type": "string",
+          "description": "The text of the response being rated."
+        },
+        "userPrompt": {
+          "type": "string",
+          "description": "The user prompt that generated this response."
+        }
+      },
+      "required": ["messageId", "userId", "rating", "createdAt"]
     }
   },
   "firestore": {
     "/preferences/{userId}": {
       "schema": "UserPreference",
       "description": "Global preferences for each user."
+    },
+    "/feedback/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "User feedback on assistant responses."
     }
   }
 }

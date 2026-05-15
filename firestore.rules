@@ -8,7 +8,11 @@ service cloud.firestore {
 
     // Global helpers
     function isSignedIn() { return request.auth != null; }
-    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isOwner(userId) { 
+      return isSignedIn() 
+        && request.auth.uid == userId 
+        && request.auth.token.email_verified == true; 
+    }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
@@ -17,20 +21,38 @@ service cloud.firestore {
     function isValidUserPreference(data) {
       return data.keys().hasAll(['creatorName', 'preferredTitle', 'lastUpdated'])
         && data.keys().size() <= 4
-        && data.creatorName is string && data.creatorName.size() <= 64
-        && data.preferredTitle is string && data.preferredTitle.size() <= 32
-        && (data.lastUpdated is timestamp || data.lastUpdated is string) // Allowing both for flexibility, but better as timestamp
+        && data.creatorName is string && data.creatorName.size() >= 1 && data.creatorName.size() <= 64
+        && data.preferredTitle is string && data.preferredTitle.size() >= 1 && data.preferredTitle.size() <= 32
+        && (data.lastUpdated is string && data.lastUpdated.size() <= 100)
         && (!data.keys().hasAny(['isMuted']) || data.isMuted is bool);
+    }
+
+    function isValidFeedback(data) {
+      return data.keys().hasAll(['messageId', 'userId', 'rating', 'createdAt'])
+        && data.keys().size() <= 6
+        && data.messageId is string && data.messageId.size() <= 128
+        && data.userId is string && data.userId == request.auth.uid
+        && data.rating in ['up', 'down']
+        && (data.createdAt is string && data.createdAt.size() <= 100)
+        && (!data.keys().hasAny(['responseText']) || (data.responseText is string && data.responseText.size() <= 5000))
+        && (!data.keys().hasAny(['userPrompt']) || (data.userPrompt is string && data.userPrompt.size() <= 5000));
     }
 
     match /preferences/{userId} {
       allow get: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUserPreference(incoming());
+      allow create: if isOwner(userId) && isValidUserPreference(incoming()) && isValidId(userId);
       allow update: if isOwner(userId) && isValidUserPreference(incoming())
+        && incoming().lastUpdated != existing().lastUpdated // Ensure something changed or at least timestamp updated
         && (
           incoming().diff(existing()).affectedKeys().hasOnly(['creatorName', 'preferredTitle', 'lastUpdated', 'isMuted'])
         );
-      allow delete: if false; // Preferences should not be deleted usually
+      allow delete: if false;
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if isSignedIn() && request.auth.token.email_verified == true && isValidFeedback(incoming()) && isValidId(feedbackId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
   }
 }
